@@ -1,6 +1,9 @@
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::fs::ReadDir;
+use std::path::Path;
+use std::path::PathBuf;
 use std::vec::Vec;
 
 extern crate clap;
@@ -42,7 +45,7 @@ fn main() {
         Some(search_root) => {
             if search_root.is_dir() {
                 let follow_symlinks = matches.is_present("follow-symlinks");
-                walk_directories(search_root.as_path(), follow_symlinks);
+                do_perform_walk(search_root, follow_symlinks);
             } else {
                 eprintln!("{} is not a directory.", search_root.display());
             }
@@ -57,40 +60,62 @@ fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-fn walk_directories(dir: &Path, follow_symlinks: bool) {
-    let mut children = Vec::new();
+fn do_perform_walk(root_dir: PathBuf, _follow_symlinks: bool) {
+    let mut to_walk = Vec::new();
+    to_walk.push(root_dir);
 
-    match fs::read_dir(dir) {
-        Err(e) => {
-            eprintln!("Can't walk directory {}. {}", dir.display(), e);
-            return;
-        }
-        Ok(entries) => {
-            for entry in entries {
-                match entry {
-                    Err(e) => {
-                        eprintln!("Error while walking directory {}. {}", dir.display(), e);
-                        return;
+    while let Some(dir_buf) = to_walk.pop() {
+        let start_from = to_walk.len();
+        let dir = dir_buf.as_path();
+        match fs::read_dir(dir) {
+            Err(e) => {
+                eprintln!("Can't walk directory {}. {}", dir.display(), e);
+                continue;
+            }
+            Ok(entries) => {
+                let mut add_child = |dir: PathBuf| to_walk.push(dir);
+                if handle_children(dir, entries, &mut add_child) {
+                    println!("{}", dir.display());
+
+                    // Backtrack, we don't need to scan any of the children of this directory
+                    while to_walk.len() > start_from {
+                        to_walk.pop();
                     }
-                    Ok(entry) => {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            if let Some(name) = path.file_name() {
-                                if name == ".git" {
-                                    println!("{}", dir.display());
-                                    return;
-                                }
-                            }
+                }
+            }
+        }
+    }
+}
 
-                            children.push(path);
+fn handle_children<AddChild: FnMut(PathBuf)>(
+    dir: &Path,
+    entries: ReadDir,
+    add_child: &mut AddChild,
+) -> bool {
+    for entry in entries {
+        match entry {
+            Err(e) => {
+                eprintln!("Error while walking directory {}. {}", dir.display(), e);
+                return false;
+            }
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = path.file_name() {
+                        if is_git_repo(&path, name) {
+                            return true;
                         }
+
+                        add_child(path);
                     }
                 }
             }
         }
     }
 
-    for sub_directory in children {
-        walk_directories(&sub_directory, follow_symlinks);
-    }
+    false
+}
+
+fn is_git_repo(_dir: &PathBuf, file_name: &OsStr) -> bool {
+    return file_name == ".git";
 }
