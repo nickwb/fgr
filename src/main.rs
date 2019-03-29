@@ -1,13 +1,16 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
-use std::fs::ReadDir;
+use std::fs::{DirEntry, ReadDir};
 use std::path::Path;
 use std::path::PathBuf;
 use std::vec::Vec;
 
 extern crate clap;
 use clap::{App, Arg};
+
+mod paths;
+use paths::SearchPath;
 
 fn main() {
     let app = App::new("fgr")
@@ -60,20 +63,35 @@ fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-fn do_perform_walk(root_dir: PathBuf, _follow_symlinks: bool) {
+fn do_perform_walk(root_dir: PathBuf, follow_symlinks: bool) {
     let mut to_walk = Vec::new();
-    to_walk.push(root_dir);
+    to_walk.push(SearchPath::from_path(root_dir, 0));
 
-    while let Some(dir_buf) = to_walk.pop() {
+    while let Some(mut search_path) = to_walk.pop() {
+        // Either skip symlinks, or resolve the actual path
+        {
+            if !search_path.resolve_symlinks(follow_symlinks) {
+                eprintln!(
+                    "Ignoring {}, because it is a symlink",
+                    search_path.to_path().display()
+                );
+                continue;
+            }
+        }
+
+        let dir = search_path.to_path();
         let start_from = to_walk.len();
-        let dir = dir_buf.as_path();
+
         match fs::read_dir(dir) {
             Err(e) => {
                 eprintln!("Can't walk directory {}. {}", dir.display(), e);
                 continue;
             }
             Ok(entries) => {
-                let mut add_child = |dir: PathBuf| to_walk.push(dir);
+                let new_depth = search_path.depth() + 1;
+                let mut add_child =
+                    |dir: DirEntry| to_walk.push(SearchPath::from_dir_entry(dir, new_depth));
+
                 if handle_children(dir, entries, &mut add_child) {
                     println!("{}", dir.display());
 
@@ -84,10 +102,11 @@ fn do_perform_walk(root_dir: PathBuf, _follow_symlinks: bool) {
                 }
             }
         }
+        std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 }
 
-fn handle_children<AddChild: FnMut(PathBuf)>(
+fn handle_children<AddChild: FnMut(DirEntry)>(
     dir: &Path,
     entries: ReadDir,
     add_child: &mut AddChild,
@@ -100,13 +119,14 @@ fn handle_children<AddChild: FnMut(PathBuf)>(
             }
             Ok(entry) => {
                 let path = entry.path();
+
                 if path.is_dir() {
                     if let Some(name) = path.file_name() {
                         if is_git_repo(&path, name) {
                             return true;
                         }
 
-                        add_child(path);
+                        add_child(entry);
                     }
                 }
             }
