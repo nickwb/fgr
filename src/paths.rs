@@ -2,6 +2,8 @@ use std::fs::{self, DirEntry, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::symlinks::SymlinkBehaviour;
+
 pub struct SearchPath {
     depth: u32,
     path: PathBuf,
@@ -17,18 +19,21 @@ impl SearchPath {
         self.depth
     }
 
-    pub fn resolve_symlinks(&mut self, follow_symlinks: bool) -> bool {
-        if follow_symlinks {
-            if let Ok(path) = fs::read_link(self.to_path()) {
-                self.path = path;
+    pub fn resolve_symlinks(&mut self, symlink_behaviour: &SymlinkBehaviour) -> bool {
+        match symlink_behaviour {
+            SymlinkBehaviour::Skip => {
+                let is_symlink = match &self.entry {
+                    Some(entry) => SearchPath::is_metadata_symlink(entry.metadata()),
+                    None => SearchPath::is_metadata_symlink(fs::symlink_metadata(self.to_path())),
+                };
+                !is_symlink
             }
-            true
-        } else {
-            let is_symlink = match &self.entry {
-                Some(entry) => SearchPath::is_metadata_symlink(entry.metadata()),
-                None => SearchPath::is_metadata_symlink(fs::symlink_metadata(self.to_path())),
-            };
-            !is_symlink
+            SymlinkBehaviour::Follow => {
+                if let Ok(path) = fs::read_link(self.to_path()) {
+                    self.path = path;
+                }
+                true
+            }
         }
     }
 

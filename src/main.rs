@@ -6,11 +6,15 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::vec::Vec;
 
+#[macro_use]
 extern crate clap;
 use clap::{App, Arg};
 
 mod paths;
+mod symlinks;
+
 use paths::SearchPath;
+use symlinks::SymlinkBehaviour;
 
 fn main() {
     let app = App::new("fgr")
@@ -21,7 +25,7 @@ fn main() {
             Arg::with_name("search-root")
                 .takes_value(true)
                 .value_name("PATH")
-                .help("The root directory where the search will begin. Defaults to current working directory."),
+                .help("The directory where the search will begin"),
         )
         .arg(
             Arg::with_name("match-name")
@@ -29,16 +33,23 @@ fn main() {
                 .long("match-name")
                 .takes_value(true)
                 .value_name("PATTERN")
-                .help("Exclude repositories where the directory name does not match this pattern."),
+                .help("Exclude repositories that match this pattern"),
         )
         .arg(
-            Arg::with_name("follow-symlinks")
+            Arg::with_name("symlinks")
                 .short("s")
-                .long("follow-symlinks")
-                .help("Follow symlinks when traversing directories."),
+                .long("symlinks")
+                .takes_value(true)
+                .value_name("STRATEGY")
+                .possible_values(&SymlinkBehaviour::variants())
+                .case_insensitive(true)
+                .default_value("skip")
+                .help("Strategy for handling symlinks"),
         );
 
     let matches = app.get_matches();
+    let symlink_behaviour =
+        value_t!(matches, "symlinks", SymlinkBehaviour).expect("Invalid value for -s/--symlinks.");
 
     match get_search_root(matches.value_of("search-root")) {
         None => {
@@ -47,8 +58,7 @@ fn main() {
         }
         Some(search_root) => {
             if search_root.is_dir() {
-                let follow_symlinks = matches.is_present("follow-symlinks");
-                do_perform_walk(search_root, follow_symlinks);
+                do_perform_walk(search_root, &symlink_behaviour);
             } else {
                 eprintln!("{} is not a directory.", search_root.display());
             }
@@ -63,14 +73,14 @@ fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-fn do_perform_walk(root_dir: PathBuf, follow_symlinks: bool) {
+fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &SymlinkBehaviour) {
     let mut to_walk = Vec::new();
     to_walk.push(SearchPath::from_path(root_dir, 0));
 
     while let Some(mut search_path) = to_walk.pop() {
         // Either skip symlinks, or resolve the actual path
         {
-            if !search_path.resolve_symlinks(follow_symlinks) {
+            if !search_path.resolve_symlinks(symlink_behaviour) {
                 eprintln!(
                     "Ignoring {}, because it is a symlink",
                     search_path.to_path().display()
@@ -102,7 +112,6 @@ fn do_perform_walk(root_dir: PathBuf, follow_symlinks: bool) {
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 }
 
