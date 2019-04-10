@@ -19,7 +19,7 @@ impl SearchPath {
         self.depth
     }
 
-    pub fn resolve_symlinks(&mut self, symlink_behaviour: &SymlinkBehaviour) -> bool {
+    pub fn resolve_symlinks(&mut self, symlink_behaviour: &mut SymlinkBehaviour) -> bool {
         match symlink_behaviour {
             SymlinkBehaviour::Skip => {
                 let is_symlink = match &self.entry {
@@ -28,10 +28,20 @@ impl SearchPath {
                 };
                 !is_symlink
             }
-            SymlinkBehaviour::Follow => {
+            SymlinkBehaviour::Follow(follow_state) => {
                 if let Ok(path) = fs::read_link(self.to_path()) {
-                    self.path = path;
+                    if let Ok(absolute) = path.canonicalize() {
+                        self.path = absolute;
+                    } else {
+                        return false;
+                    }
                 }
+
+                if follow_state.is_seen(&self.path) {
+                    return false;
+                }
+
+                follow_state.mark_seen(&self.path);
                 true
             }
         }
