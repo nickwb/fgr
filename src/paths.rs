@@ -2,12 +2,20 @@ use std::fs::{self, DirEntry, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::symlinks::SymlinkBehaviour;
+use crate::symlinks::{FollowState, SymlinkBehaviour};
 
 pub struct SearchPath {
     depth: u32,
     path: PathBuf,
     entry: Option<DirEntry>,
+}
+
+pub enum SymlinkResolveOutcome {
+    NotSymlink,
+    SkipSymlink,
+    FollowSymlink,
+    AlreadyTraversed,
+    CanonicalizeFailed,
 }
 
 impl SearchPath {
@@ -19,32 +27,54 @@ impl SearchPath {
         self.depth
     }
 
-    pub fn resolve_symlinks(&mut self, symlink_behaviour: &mut SymlinkBehaviour) -> bool {
+    pub fn resolve_symlinks(
+        &mut self,
+        symlink_behaviour: &mut SymlinkBehaviour,
+    ) -> SymlinkResolveOutcome {
         match symlink_behaviour {
             SymlinkBehaviour::Skip => {
                 let is_symlink = match &self.entry {
                     Some(entry) => SearchPath::is_metadata_symlink(entry.metadata()),
                     None => SearchPath::is_metadata_symlink(fs::symlink_metadata(self.to_path())),
                 };
-                !is_symlink
+
+                if is_symlink {
+                    SymlinkResolveOutcome::SkipSymlink
+                } else {
+                    SymlinkResolveOutcome::NotSymlink
+                }
             }
-            SymlinkBehaviour::Follow(follow_state) => {
-                if let Ok(path) = fs::read_link(self.to_path()) {
+            SymlinkBehaviour::Follow(follow_state) => match fs::read_link(self.to_path()) {
+                Ok(path) => {
                     if let Ok(absolute) = path.canonicalize() {
                         self.path = absolute;
+                        if SearchPath::check_for_cycles(follow_state, &self.path) {
+                            SymlinkResolveOutcome::AlreadyTraversed
+                        } else {
+                            SymlinkResolveOutcome::FollowSymlink
+                        }
                     } else {
-                        return false;
+                        SymlinkResolveOutcome::CanonicalizeFailed
                     }
                 }
-
-                if follow_state.is_seen(&self.path) {
-                    return false;
+                Err(_error) => {
+                    if SearchPath::check_for_cycles(follow_state, &self.path) {
+                        SymlinkResolveOutcome::AlreadyTraversed
+                    } else {
+                        SymlinkResolveOutcome::NotSymlink
+                    }
                 }
-
-                follow_state.mark_seen(&self.path);
-                true
-            }
+            },
         }
+    }
+
+    fn check_for_cycles(follow_state: &mut FollowState, path: &Path) -> bool {
+        if follow_state.is_seen(path) {
+            return true;
+        }
+
+        follow_state.mark_seen(path);
+        false
     }
 
     fn is_metadata_symlink(maybe_metadata: io::Result<Metadata>) -> bool {

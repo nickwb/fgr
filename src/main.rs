@@ -14,7 +14,7 @@ use clap::{App, Arg};
 mod paths;
 mod symlinks;
 
-use paths::SearchPath;
+use paths::{SearchPath, SymlinkResolveOutcome};
 use symlinks::{FollowState, SymlinkBehaviour, SymlinkOption};
 
 fn main() {
@@ -86,12 +86,30 @@ fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &mut SymlinkBehaviour) 
     while let Some(mut search_path) = to_walk.pop() {
         // Either skip symlinks, or resolve the actual path
         {
-            if !search_path.resolve_symlinks(symlink_behaviour) {
-                eprintln!(
-                    "Ignoring {}, because it is a symlink",
-                    search_path.to_path().display()
-                );
-                continue;
+            match search_path.resolve_symlinks(symlink_behaviour) {
+                SymlinkResolveOutcome::AlreadyTraversed => {
+                    eprintln!(
+                        "Skipping: {}, the directory has already been traversed.",
+                        search_path.to_path().display()
+                    );
+                    continue;
+                }
+                SymlinkResolveOutcome::SkipSymlink => {
+                    eprintln!(
+                        "Skipping {}, because it is a symlink",
+                        search_path.to_path().display()
+                    );
+                    continue;
+                }
+                SymlinkResolveOutcome::CanonicalizeFailed => {
+                    eprintln!(
+                        "Tried to follow symlink: {}, but there was an error determining the absolute path of the link target.",
+                        search_path.to_path().display()
+                    );
+                    continue;
+                }
+                SymlinkResolveOutcome::FollowSymlink => (),
+                SymlinkResolveOutcome::NotSymlink => (),
             }
         }
 
