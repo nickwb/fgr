@@ -2,7 +2,7 @@ use std::fs::{self, DirEntry, Metadata};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
-use crate::symlinks::{FollowState, SymlinkBehaviour};
+use crate::symlinks::SymlinkBehaviour;
 
 pub struct SearchPath {
     depth: u32,
@@ -49,7 +49,7 @@ impl SearchPath {
                 Ok(path) => {
                     if let Ok(absolute) = path.canonicalize() {
                         self.path = absolute;
-                        if SearchPath::check_for_cycles(follow_state, &self.path) {
+                        if follow_state.check_already_visited_and_update(&self.path) {
                             SymlinkResolveOutcome::AlreadyTraversed
                         } else {
                             SymlinkResolveOutcome::FollowSymlink
@@ -61,7 +61,7 @@ impl SearchPath {
                 Err(error) => match error.kind() {
                     // InvalidInput == "That's not a symlink."
                     ErrorKind::InvalidInput => {
-                        if SearchPath::check_for_cycles(follow_state, &self.path) {
+                        if follow_state.check_already_visited_and_update(&self.path) {
                             SymlinkResolveOutcome::AlreadyTraversed
                         } else {
                             SymlinkResolveOutcome::NotSymlink
@@ -71,15 +71,6 @@ impl SearchPath {
                 },
             },
         }
-    }
-
-    fn check_for_cycles(follow_state: &mut FollowState, path: &Path) -> bool {
-        if follow_state.is_seen(path) {
-            return true;
-        }
-
-        follow_state.mark_seen(path);
-        false
     }
 
     fn is_metadata_symlink(maybe_metadata: io::Result<Metadata>) -> bool {

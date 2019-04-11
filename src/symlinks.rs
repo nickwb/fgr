@@ -25,11 +25,20 @@ impl FollowState {
         }
     }
 
-    pub fn is_seen(&self, path: &Path) -> bool {
+    pub fn check_already_visited_and_update(&mut self, path: &Path) -> bool {
+        if self.is_seen(path) {
+            return true;
+        }
+
+        self.mark_seen(path);
+        false
+    }
+
+    fn is_seen(&self, path: &Path) -> bool {
         self.seen_items.contains(path)
     }
 
-    pub fn mark_seen(&mut self, path: &Path) {
+    fn mark_seen(&mut self, path: &Path) {
         self.seen_items.insert(path.to_path_buf());
     }
 }
