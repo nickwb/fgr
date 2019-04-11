@@ -1,5 +1,5 @@
 use std::fs::{self, DirEntry, Metadata};
-use std::io;
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use crate::symlinks::{FollowState, SymlinkBehaviour};
@@ -16,6 +16,7 @@ pub enum SymlinkResolveOutcome {
     FollowSymlink,
     AlreadyTraversed,
     CanonicalizeFailed,
+    ReadLinkFailed,
 }
 
 impl SearchPath {
@@ -57,13 +58,17 @@ impl SearchPath {
                         SymlinkResolveOutcome::CanonicalizeFailed
                     }
                 }
-                Err(_error) => {
-                    if SearchPath::check_for_cycles(follow_state, &self.path) {
-                        SymlinkResolveOutcome::AlreadyTraversed
-                    } else {
-                        SymlinkResolveOutcome::NotSymlink
+                Err(error) => match error.kind() {
+                    // InvalidInput == "That's not a symlink."
+                    ErrorKind::InvalidInput => {
+                        if SearchPath::check_for_cycles(follow_state, &self.path) {
+                            SymlinkResolveOutcome::AlreadyTraversed
+                        } else {
+                            SymlinkResolveOutcome::NotSymlink
+                        }
                     }
-                }
+                    _ => SymlinkResolveOutcome::ReadLinkFailed,
+                },
             },
         }
     }
