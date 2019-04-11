@@ -6,16 +6,14 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::vec::Vec;
 
-#[macro_use]
 extern crate clap;
-
 use clap::{App, Arg};
 
 mod paths;
 mod symlinks;
 
 use paths::{SearchPath, SymlinkResolveOutcome};
-use symlinks::{FollowState, SymlinkBehaviour, SymlinkOption};
+use symlinks::{FollowState, SymlinkBehaviour};
 
 fn main() {
     let app = App::new("fgr")
@@ -29,33 +27,36 @@ fn main() {
                 .help("The directory where the search will begin"),
         )
         .arg(
+            Arg::with_name("all")
+                .takes_value(false)
+                .short("a")
+                .long("all")
+                .help("Do not ignore directories starting with `.`"),
+        )
+        .arg(
             Arg::with_name("verbose")
                 .takes_value(false)
                 .short("v")
                 .long("verbose")
-                .help("Output detailed messages to standard error."),
+                .help("Output detailed messages to standard error"),
         )
         .arg(
             Arg::with_name("symlinks")
                 .short("s")
-                .long("symlinks")
-                .takes_value(true)
-                .value_name("STRATEGY")
-                .possible_values(&SymlinkOption::variants())
-                .case_insensitive(true)
-                .default_value("skip")
-                .help("Strategy for handling symlinks"),
+                .long("follow-symlinks")
+                .takes_value(false)
+                .help("Follow symlinks rather than ignoring them"),
         );
 
     let matches = app.get_matches();
-    let symlink_option =
-        value_t!(matches, "symlinks", SymlinkOption).expect("Invalid value for -s/--symlinks.");
 
+    let follow_symlinks = matches.is_present("symlinks");
+    let show_all = matches.is_present("all");
     let verbose_output = matches.is_present("verbose");
 
-    let mut symlink_behaviour = match symlink_option {
-        SymlinkOption::Skip => SymlinkBehaviour::Skip,
-        SymlinkOption::Follow => SymlinkBehaviour::Follow(FollowState::new()),
+    let mut symlink_behaviour = match follow_symlinks {
+        false => SymlinkBehaviour::Skip,
+        true => SymlinkBehaviour::Follow(FollowState::new()),
     };
 
     match get_search_root(matches.value_of("search-root")) {
@@ -65,7 +66,12 @@ fn main() {
         }
         Some(search_root) => {
             if search_root.is_dir() {
-                do_perform_walk(search_root, &mut symlink_behaviour, verbose_output);
+                do_perform_walk(
+                    search_root,
+                    &mut symlink_behaviour,
+                    show_all,
+                    verbose_output,
+                );
             } else {
                 eprintln!("{} is not a directory.", search_root.display());
             }
@@ -83,6 +89,7 @@ fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
 fn do_perform_walk(
     root_dir: PathBuf,
     symlink_behaviour: &mut SymlinkBehaviour,
+    show_all: bool,
     verbose_output: bool,
 ) {
     let mut to_walk = Vec::new();
@@ -139,10 +146,11 @@ fn do_perform_walk(
             }
             Ok(entries) => {
                 let new_depth = search_path.depth() + 1;
-                let mut add_child =
-                    |dir: DirEntry| to_walk.push(SearchPath::from_dir_entry(dir, new_depth));
+                let mut add_child = |dir: DirEntry| {
+                    to_walk.push(SearchPath::from_dir_entry(dir, new_depth));
+                };
 
-                if handle_children(dir, entries, &mut add_child) {
+                if handle_children(dir, entries, show_all, &mut add_child) {
                     println!("{}", dir.display());
 
                     // Backtrack, we don't need to scan any of the children of this directory
@@ -158,6 +166,7 @@ fn do_perform_walk(
 fn handle_children<AddChild: FnMut(DirEntry)>(
     dir: &Path,
     entries: ReadDir,
+    show_all: bool,
     add_child: &mut AddChild,
 ) -> bool {
     for entry in entries {
@@ -175,6 +184,10 @@ fn handle_children<AddChild: FnMut(DirEntry)>(
                             return true;
                         }
 
+                        if should_skip_directory(&path, name, show_all) {
+                            continue;
+                        }
+
                         add_child(entry);
                     }
                 }
@@ -186,5 +199,13 @@ fn handle_children<AddChild: FnMut(DirEntry)>(
 }
 
 fn is_git_repo(_dir: &PathBuf, file_name: &OsStr) -> bool {
-    return file_name == ".git";
+    file_name == ".git"
+}
+
+fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, show_all: bool) -> bool {
+    !show_all
+        && match file_name.to_str() {
+            Some(str) => str.starts_with("."),
+            None => true, // If we can't even decode the file name...
+        }
 }

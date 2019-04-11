@@ -1,14 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-arg_enum! {
-    #[derive(PartialEq, Debug)]
-    pub enum SymlinkOption {
-        Skip,
-        Follow
-    }
-}
-
 pub enum SymlinkBehaviour {
     Skip,
     Follow(FollowState),
