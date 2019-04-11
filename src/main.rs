@@ -29,14 +29,6 @@ fn main() {
                 .help("The directory where the search will begin"),
         )
         .arg(
-            Arg::with_name("match-name")
-                .short("n")
-                .long("match-name")
-                .takes_value(true)
-                .value_name("PATTERN")
-                .help("Exclude repositories that match this pattern"),
-        )
-        .arg(
             Arg::with_name("symlinks")
                 .short("s")
                 .long("symlinks")
@@ -84,7 +76,7 @@ fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &mut SymlinkBehaviour) 
     to_walk.push(SearchPath::from_path(root_dir, 0));
 
     while let Some(mut search_path) = to_walk.pop() {
-        // Either skip symlinks, or resolve the actual path
+        // Handle symlinks
         {
             match search_path.resolve_symlinks(symlink_behaviour) {
                 SymlinkResolveOutcome::AlreadyTraversed => {
@@ -104,6 +96,13 @@ fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &mut SymlinkBehaviour) 
                 SymlinkResolveOutcome::CanonicalizeFailed => {
                     eprintln!(
                         "Tried to follow symlink: {}, but there was an error determining the absolute path of the link target.",
+                        search_path.to_path().display()
+                    );
+                    continue;
+                }
+                SymlinkResolveOutcome::ReadLinkFailed => {
+                    eprintln!(
+                        "Skipping: {}, Could not determine if this was a symlink or not.",
                         search_path.to_path().display()
                     );
                     continue;
