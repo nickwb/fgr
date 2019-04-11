@@ -28,6 +28,7 @@ impl SearchPath {
         self.depth
     }
 
+    // move this on to SymlinkBehaviour
     pub fn resolve_symlinks(
         &mut self,
         symlink_behaviour: &mut SymlinkBehaviour,
