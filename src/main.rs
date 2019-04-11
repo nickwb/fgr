@@ -29,6 +29,13 @@ fn main() {
                 .help("The directory where the search will begin"),
         )
         .arg(
+            Arg::with_name("verbose")
+                .takes_value(false)
+                .short("v")
+                .long("verbose")
+                .help("Output detailed messages to standard error."),
+        )
+        .arg(
             Arg::with_name("symlinks")
                 .short("s")
                 .long("symlinks")
@@ -44,6 +51,8 @@ fn main() {
     let symlink_option =
         value_t!(matches, "symlinks", SymlinkOption).expect("Invalid value for -s/--symlinks.");
 
+    let verbose_output = matches.is_present("verbose");
+
     let mut symlink_behaviour = match symlink_option {
         SymlinkOption::Skip => SymlinkBehaviour::Skip,
         SymlinkOption::Follow => SymlinkBehaviour::Follow(FollowState::new()),
@@ -56,7 +65,7 @@ fn main() {
         }
         Some(search_root) => {
             if search_root.is_dir() {
-                do_perform_walk(search_root, &mut symlink_behaviour);
+                do_perform_walk(search_root, &mut symlink_behaviour, verbose_output);
             } else {
                 eprintln!("{} is not a directory.", search_root.display());
             }
@@ -71,7 +80,11 @@ fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
     }
 }
 
-fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &mut SymlinkBehaviour) {
+fn do_perform_walk(
+    root_dir: PathBuf,
+    symlink_behaviour: &mut SymlinkBehaviour,
+    verbose_output: bool,
+) {
     let mut to_walk = Vec::new();
     to_walk.push(SearchPath::from_path(root_dir, 0));
 
@@ -80,17 +93,21 @@ fn do_perform_walk(root_dir: PathBuf, symlink_behaviour: &mut SymlinkBehaviour) 
         {
             match search_path.resolve_symlinks(symlink_behaviour) {
                 SymlinkResolveOutcome::AlreadyTraversed => {
-                    eprintln!(
-                        "Skipping: {}, the directory has already been traversed.",
-                        search_path.to_path().display()
-                    );
+                    if verbose_output {
+                        eprintln!(
+                            "Skipping: {}, the directory has already been traversed.",
+                            search_path.to_path().display()
+                        );
+                    }
                     continue;
                 }
                 SymlinkResolveOutcome::SkipSymlink => {
-                    eprintln!(
-                        "Skipping {}, because it is a symlink",
-                        search_path.to_path().display()
-                    );
+                    if verbose_output {
+                        eprintln!(
+                            "Skipping {}, because it is a symlink",
+                            search_path.to_path().display()
+                        );
+                    }
                     continue;
                 }
                 SymlinkResolveOutcome::CanonicalizeFailed => {
