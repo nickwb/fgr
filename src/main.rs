@@ -11,8 +11,8 @@ use clap::{App, Arg};
 
 mod search;
 
-use search::paths::{SearchPath, SymlinkResolveOutcome};
-use search::symlink::{FollowState, SymlinkBehaviour};
+use search::paths::SearchPath;
+use search::symlink::{FollowState, SymlinkBehaviour, SymlinkResolveOutcome};
 
 fn main() {
     let app = App::new("fgr")
