@@ -3,7 +3,7 @@ use std::fs::{self, DirEntry, Metadata};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
-use crate::symlinks::SymlinkBehaviour;
+use crate::search::symlinks::SymlinkBehaviour;
 
 pub struct SearchPath {
     depth: u32,

@@ -9,11 +9,10 @@ use std::vec::Vec;
 extern crate clap;
 use clap::{App, Arg};
 
-mod paths;
-mod symlinks;
+mod search;
 
-use paths::{SearchPath, SymlinkResolveOutcome};
-use symlinks::{FollowState, SymlinkBehaviour};
+use search::paths::{SearchPath, SymlinkResolveOutcome};
+use search::symlinks::{FollowState, SymlinkBehaviour};
 
 fn main() {
     let app = App::new("fgr")
