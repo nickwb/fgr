@@ -1,4 +1,3 @@
-use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::{DirEntry, ReadDir};
@@ -7,99 +6,33 @@ use std::path::PathBuf;
 use std::vec::Vec;
 
 extern crate clap;
-use clap::{App, Arg};
 
 mod search;
-
 use search::candidate::SearchCandidate;
-use search::symlink::{FollowState, SymlinkBehaviour, SymlinkResolveOutcome};
+use search::cli::RunOptions;
+use search::symlink::SymlinkResolveOutcome;
 
 fn main() {
-    let app = App::new("fgr")
-        .version("0.1")
-        .author("Nick Young")
-        .about("A simple utility for finding git repositories.")
-        .arg(
-            Arg::with_name("search-root")
-                .takes_value(true)
-                .value_name("PATH")
-                .help("The directory where the search will begin"),
-        )
-        .arg(
-            Arg::with_name("all")
-                .takes_value(false)
-                .short("a")
-                .long("all")
-                .help("Do not ignore directories starting with `.`"),
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .takes_value(false)
-                .short("v")
-                .long("verbose")
-                .help("Output detailed messages to standard error"),
-        )
-        .arg(
-            Arg::with_name("symlinks")
-                .short("s")
-                .long("follow-symlinks")
-                .takes_value(false)
-                .help("Follow symlinks rather than ignoring them"),
-        );
-
-    let matches = app.get_matches();
-
-    let follow_symlinks = matches.is_present("symlinks");
-    let show_all = matches.is_present("all");
-    let verbose_output = matches.is_present("verbose");
-
-    let mut symlink_behaviour = match follow_symlinks {
-        false => SymlinkBehaviour::Skip,
-        true => SymlinkBehaviour::Follow(FollowState::new()),
-    };
-
-    match get_search_root(matches.value_of("search-root")) {
-        None => {
-            eprintln!("Directory is invalid or does not exist.");
+    let mut run = RunOptions::parse_cli();
+    match &mut run {
+        Ok(options) => do_perform_walk(options),
+        Err(error) => {
+            eprintln!("{}", error);
             std::process::exit(-1);
         }
-        Some(search_root) => {
-            if search_root.is_dir() {
-                do_perform_walk(
-                    search_root,
-                    &mut symlink_behaviour,
-                    show_all,
-                    verbose_output,
-                );
-            } else {
-                eprintln!("{} is not a directory.", search_root.display());
-            }
-        }
-    };
-}
-
-fn get_search_root(cfg: Option<&str>) -> Option<PathBuf> {
-    match cfg {
-        None => Some(env::current_dir().expect("Could not get current directory.")),
-        Some(path_str) => PathBuf::from(path_str).canonicalize().ok(),
     }
 }
 
-fn do_perform_walk(
-    root_dir: PathBuf,
-    symlink_behaviour: &mut SymlinkBehaviour,
-    show_all: bool,
-    verbose_output: bool,
-) {
+fn do_perform_walk(options: &mut RunOptions) {
     let mut to_walk = Vec::new();
-    to_walk.push(SearchCandidate::from_path(root_dir, 0));
+    to_walk.push(SearchCandidate::from_path(options.search_root().clone(), 0));
 
     while let Some(mut search_path) = to_walk.pop() {
         // Handle symlinks
         {
-            match search_path.resolve_symlinks(symlink_behaviour) {
+            match search_path.resolve_symlinks(options.symlink_behaviour()) {
                 SymlinkResolveOutcome::AlreadyTraversed => {
-                    if verbose_output {
+                    if options.verbose() {
                         eprintln!(
                             "Skipping: {}, the directory has already been traversed.",
                             search_path.to_path().display()
@@ -108,7 +41,7 @@ fn do_perform_walk(
                     continue;
                 }
                 SymlinkResolveOutcome::SkipSymlink => {
-                    if verbose_output {
+                    if options.verbose() {
                         eprintln!(
                             "Skipping {}, because it is a symlink",
                             search_path.to_path().display()
@@ -117,7 +50,7 @@ fn do_perform_walk(
                     continue;
                 }
                 SymlinkResolveOutcome::CanonicalizeFailed(error_message) => {
-                    if verbose_output {
+                    if options.verbose() {
                         eprintln!(
                             "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
                             search_path.to_path().display(),
@@ -127,7 +60,7 @@ fn do_perform_walk(
                     continue;
                 }
                 SymlinkResolveOutcome::ReadLinkFailed(error_message) => {
-                    if verbose_output {
+                    if options.verbose() {
                         eprintln!(
                             "Skipping: {}, Could not determine if this was a symlink or not => {}.",
                             search_path.to_path().display(),
@@ -155,7 +88,7 @@ fn do_perform_walk(
                     to_walk.push(SearchCandidate::from_dir_entry(dir, new_depth));
                 };
 
-                if handle_children(dir, entries, show_all, &mut add_child) {
+                if handle_children(dir, entries, options.show_all(), &mut add_child) {
                     println!("{}", dir.display());
 
                     // Backtrack, we don't need to scan any of the children of this directory
