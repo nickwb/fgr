@@ -72,7 +72,7 @@ impl SymlinkBehaviour {
             SymlinkBehaviour::Follow(follow_state) => match fs::read_link(candidate.to_path()) {
                 Ok(path) => match path.canonicalize() {
                     Ok(absolute) => {
-                        if follow_state.check_already_visited_and_update(candidate.to_path()) {
+                        if follow_state.check_already_visited_and_update(absolute.as_path()) {
                             SymlinkResolveResult::from_outcome_and_path(
                                 SymlinkResolveOutcome::AlreadyTraversed,
                                 absolute,
