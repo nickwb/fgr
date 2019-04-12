@@ -4,7 +4,7 @@ use std::fs::{self, Metadata};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
-use crate::search::paths::SearchPath;
+use crate::search::candidate::SearchCandidate;
 
 pub enum SymlinkBehaviour {
     Skip,
@@ -55,12 +55,12 @@ impl FollowState {
 }
 
 impl SymlinkBehaviour {
-    pub fn resolve_search_path(&mut self, search_path: &SearchPath) -> SymlinkResolveResult {
+    pub fn resolve_candidate(&mut self, candidate: &SearchCandidate) -> SymlinkResolveResult {
         match self {
             SymlinkBehaviour::Skip => {
-                let is_symlink = match search_path.dir_entry() {
+                let is_symlink = match candidate.dir_entry() {
                     Some(entry) => is_metadata_symlink(entry.metadata()),
-                    None => is_metadata_symlink(fs::symlink_metadata(search_path.to_path())),
+                    None => is_metadata_symlink(fs::symlink_metadata(candidate.to_path())),
                 };
 
                 if is_symlink {
@@ -69,10 +69,10 @@ impl SymlinkBehaviour {
                     SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::NotSymlink)
                 }
             }
-            SymlinkBehaviour::Follow(follow_state) => match fs::read_link(search_path.to_path()) {
+            SymlinkBehaviour::Follow(follow_state) => match fs::read_link(candidate.to_path()) {
                 Ok(path) => match path.canonicalize() {
                     Ok(absolute) => {
-                        if follow_state.check_already_visited_and_update(search_path.to_path()) {
+                        if follow_state.check_already_visited_and_update(candidate.to_path()) {
                             SymlinkResolveResult::from_outcome_and_path(
                                 SymlinkResolveOutcome::AlreadyTraversed,
                                 absolute,
@@ -93,7 +93,7 @@ impl SymlinkBehaviour {
                 Err(error) => match error.kind() {
                     // InvalidInput == "That's not a symlink."
                     ErrorKind::InvalidInput => {
-                        if follow_state.check_already_visited_and_update(search_path.to_path()) {
+                        if follow_state.check_already_visited_and_update(candidate.to_path()) {
                             SymlinkResolveResult::from_outcome(
                                 SymlinkResolveOutcome::AlreadyTraversed,
                             )

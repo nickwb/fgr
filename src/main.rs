@@ -11,7 +11,7 @@ use clap::{App, Arg};
 
 mod search;
 
-use search::paths::SearchPath;
+use search::candidate::SearchCandidate;
 use search::symlink::{FollowState, SymlinkBehaviour, SymlinkResolveOutcome};
 
 fn main() {
@@ -92,7 +92,7 @@ fn do_perform_walk(
     verbose_output: bool,
 ) {
     let mut to_walk = Vec::new();
-    to_walk.push(SearchPath::from_path(root_dir, 0));
+    to_walk.push(SearchCandidate::from_path(root_dir, 0));
 
     while let Some(mut search_path) = to_walk.pop() {
         // Handle symlinks
@@ -152,7 +152,7 @@ fn do_perform_walk(
             Ok(entries) => {
                 let new_depth = search_path.depth() + 1;
                 let mut add_child = |dir: DirEntry| {
-                    to_walk.push(SearchPath::from_dir_entry(dir, new_depth));
+                    to_walk.push(SearchCandidate::from_dir_entry(dir, new_depth));
                 };
 
                 if handle_children(dir, entries, show_all, &mut add_child) {
