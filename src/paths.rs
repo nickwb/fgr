@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::fs::{self, DirEntry, Metadata};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -15,8 +16,8 @@ pub enum SymlinkResolveOutcome {
     SkipSymlink,
     FollowSymlink,
     AlreadyTraversed,
-    CanonicalizeFailed,
-    ReadLinkFailed,
+    CanonicalizeFailed(String),
+    ReadLinkFailed(String),
 }
 
 impl SearchPath {
@@ -47,18 +48,19 @@ impl SearchPath {
                 }
             }
             SymlinkBehaviour::Follow(follow_state) => match fs::read_link(self.to_path()) {
-                Ok(path) => {
-                    if let Ok(absolute) = path.canonicalize() {
+                Ok(path) => match path.canonicalize() {
+                    Ok(absolute) => {
                         self.path = absolute;
                         if follow_state.check_already_visited_and_update(&self.path) {
                             SymlinkResolveOutcome::AlreadyTraversed
                         } else {
                             SymlinkResolveOutcome::FollowSymlink
                         }
-                    } else {
-                        SymlinkResolveOutcome::CanonicalizeFailed
                     }
-                }
+                    Err(error) => {
+                        SymlinkResolveOutcome::CanonicalizeFailed(String::from(error.description()))
+                    }
+                },
                 Err(error) => match error.kind() {
                     // InvalidInput == "That's not a symlink."
                     ErrorKind::InvalidInput => {
@@ -68,7 +70,7 @@ impl SearchPath {
                             SymlinkResolveOutcome::NotSymlink
                         }
                     }
-                    _ => SymlinkResolveOutcome::ReadLinkFailed,
+                    _ => SymlinkResolveOutcome::ReadLinkFailed(String::from(error.description())),
                 },
             },
         }

@@ -117,18 +117,24 @@ fn do_perform_walk(
                     }
                     continue;
                 }
-                SymlinkResolveOutcome::CanonicalizeFailed => {
-                    eprintln!(
-                        "Tried to follow symlink: {}, but there was an error determining the absolute path of the link target.",
-                        search_path.to_path().display()
-                    );
+                SymlinkResolveOutcome::CanonicalizeFailed(error_message) => {
+                    if verbose_output {
+                        eprintln!(
+                            "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
+                            search_path.to_path().display(),
+                            error_message
+                        );
+                    }
                     continue;
                 }
-                SymlinkResolveOutcome::ReadLinkFailed => {
-                    eprintln!(
-                        "Skipping: {}, Could not determine if this was a symlink or not.",
-                        search_path.to_path().display()
-                    );
+                SymlinkResolveOutcome::ReadLinkFailed(error_message) => {
+                    if verbose_output {
+                        eprintln!(
+                            "Skipping: {}, Could not determine if this was a symlink or not => {}.",
+                            search_path.to_path().display(),
+                            error_message
+                        );
+                    }
                     continue;
                 }
                 SymlinkResolveOutcome::FollowSymlink => (),
