@@ -12,7 +12,7 @@ use clap::{App, Arg};
 mod search;
 
 use search::paths::{SearchPath, SymlinkResolveOutcome};
-use search::symlinks::{FollowState, SymlinkBehaviour};
+use search::symlink::{FollowState, SymlinkBehaviour};
 
 fn main() {
     let app = App::new("fgr")
