@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::search::symlink::{SymlinkBehaviour, SymlinkResolveOutcome};
+use crate::search::normalize::NormalizedPath;
 
 pub struct SearchCandidate {
     depth: u32,
@@ -15,6 +16,10 @@ pub struct SearchCandidate {
 impl SearchCandidate {
     pub fn to_path(&self) -> &Path {
         self.path.as_path()
+    }
+
+    pub fn normal(&self) -> NormalizedPath {
+        NormalizedPath::new(self.to_path())
     }
 
     pub fn depth(&self) -> u32 {

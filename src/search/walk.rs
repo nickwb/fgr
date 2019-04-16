@@ -21,7 +21,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     if options.verbose() {
                         eprintln!(
                             "Skipping: {}, the directory has already been traversed.",
-                            search_path.to_path().display()
+                            search_path.normal()
                         );
                     }
                     continue;
@@ -30,7 +30,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     if options.verbose() {
                         eprintln!(
                             "Skipping {}, because it is a symlink",
-                            search_path.to_path().display()
+                            search_path.normal()
                         );
                     }
                     continue;
@@ -39,7 +39,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     if options.verbose() {
                         eprintln!(
                             "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
-                            search_path.to_path().display(),
+                            search_path.normal(),
                             error_message
                         );
                     }
@@ -55,7 +55,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
 
         match fs::read_dir(dir) {
             Err(e) => {
-                eprintln!("Can't walk directory {}. {}", dir.display(), e);
+                eprintln!("Can't walk directory {}. {}", search_path.normal(), e);
                 continue;
             }
             Ok(entries) => {
@@ -65,7 +65,9 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                 };
 
                 if handle_children(dir, entries, options.show_all(), &mut add_child) {
-                    println!("{}", dir.display());
+                    // We got a result, write it to stdout
+                    println!("{}", search_path.normal());
+                    
 
                     // Backtrack, we don't need to scan any of the children of this directory
                     while to_walk.len() > start_from {
