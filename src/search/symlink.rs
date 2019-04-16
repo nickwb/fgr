@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::error::Error;
-use std::fs::{self, Metadata};
-use std::io::{self, ErrorKind};
+use std::fs::Metadata;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::search::candidate::SearchCandidate;
@@ -26,7 +26,6 @@ pub enum SymlinkResolveOutcome {
     FollowSymlink,
     AlreadyTraversed,
     CanonicalizeFailed(String),
-    ReadLinkFailed(String),
 }
 
 impl FollowState {
@@ -56,56 +55,50 @@ impl FollowState {
 
 impl SymlinkBehaviour {
     pub fn resolve_candidate(&mut self, candidate: &SearchCandidate) -> SymlinkResolveResult {
+        let is_symlink = is_metadata_symlink(candidate.get_metadata());
         match self {
             SymlinkBehaviour::Skip => {
-                let is_symlink = match candidate.dir_entry() {
-                    Some(entry) => is_metadata_symlink(entry.metadata()),
-                    None => is_metadata_symlink(fs::symlink_metadata(candidate.to_path())),
-                };
-
                 if is_symlink {
                     SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::SkipSymlink)
                 } else {
                     SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::NotSymlink)
                 }
             }
-            SymlinkBehaviour::Follow(follow_state) => match fs::read_link(candidate.to_path()) {
-                Ok(path) => match path.canonicalize() {
-                    Ok(absolute) => {
-                        if follow_state.check_already_visited_and_update(absolute.as_path()) {
-                            SymlinkResolveResult::from_outcome_and_path(
-                                SymlinkResolveOutcome::AlreadyTraversed,
-                                absolute,
-                            )
-                        } else {
-                            SymlinkResolveResult::from_outcome_and_path(
-                                SymlinkResolveOutcome::FollowSymlink,
-                                absolute,
-                            )
-                        }
+            SymlinkBehaviour::Follow(follow_state) => {
+                if is_symlink {
+                    SymlinkBehaviour::follow_link(&candidate, follow_state)
+                } else {
+                    if follow_state.check_already_visited_and_update(candidate.to_path()) {
+                        SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::AlreadyTraversed)
+                    } else {
+                        SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::NotSymlink)
                     }
-                    Err(error) => SymlinkResolveResult::from_outcome(
-                        SymlinkResolveOutcome::CanonicalizeFailed(String::from(
-                            error.description(),
-                        )),
-                    ),
-                },
-                Err(error) => match error.kind() {
-                    // InvalidInput == "That's not a symlink."
-                    ErrorKind::InvalidInput => {
-                        if follow_state.check_already_visited_and_update(candidate.to_path()) {
-                            SymlinkResolveResult::from_outcome(
-                                SymlinkResolveOutcome::AlreadyTraversed,
-                            )
-                        } else {
-                            SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::NotSymlink)
-                        }
-                    }
-                    _ => SymlinkResolveResult::from_outcome(SymlinkResolveOutcome::ReadLinkFailed(
-                        String::from(error.description()),
-                    )),
-                },
-            },
+                }
+            }
+        }
+    }
+
+    fn follow_link(
+        candidate: &SearchCandidate,
+        follow_state: &mut FollowState,
+    ) -> SymlinkResolveResult {
+        match candidate.to_path().canonicalize() {
+            Ok(absolute) => {
+                if follow_state.check_already_visited_and_update(absolute.as_path()) {
+                    SymlinkResolveResult::from_outcome_and_path(
+                        SymlinkResolveOutcome::AlreadyTraversed,
+                        absolute,
+                    )
+                } else {
+                    SymlinkResolveResult::from_outcome_and_path(
+                        SymlinkResolveOutcome::FollowSymlink,
+                        absolute,
+                    )
+                }
+            }
+            Err(error) => SymlinkResolveResult::from_outcome(
+                SymlinkResolveOutcome::CanonicalizeFailed(String::from(error.description())),
+            ),
         }
     }
 }
@@ -132,6 +125,6 @@ impl SymlinkResolveResult {
 fn is_metadata_symlink(maybe_metadata: io::Result<Metadata>) -> bool {
     match maybe_metadata {
         Err(_e) => true,
-        Ok(meta) => !meta.is_dir() && !meta.is_file(),
+        Ok(meta) => meta.file_type().is_symlink(),
     }
 }

@@ -1,4 +1,7 @@
+use std::fs;
 use std::fs::DirEntry;
+use std::fs::Metadata;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::search::symlink::{SymlinkBehaviour, SymlinkResolveOutcome};
@@ -18,8 +21,11 @@ impl SearchCandidate {
         self.depth
     }
 
-    pub fn dir_entry(&self) -> &Option<DirEntry> {
-        &self.entry
+    pub fn get_metadata(&self) -> io::Result<Metadata> {
+        match &self.entry {
+            Some(e) => e.metadata(),
+            None => fs::symlink_metadata(&self.path),
+        }
     }
 
     pub fn resolve_symlinks(

@@ -45,16 +45,6 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     }
                     continue;
                 }
-                SymlinkResolveOutcome::ReadLinkFailed(error_message) => {
-                    if options.verbose() {
-                        eprintln!(
-                            "Skipping: {}, Could not determine if this was a symlink or not => {}.",
-                            search_path.to_path().display(),
-                            error_message
-                        );
-                    }
-                    continue;
-                }
                 SymlinkResolveOutcome::FollowSymlink => (),
                 SymlinkResolveOutcome::NotSymlink => (),
             }
