@@ -8,6 +8,7 @@ pub struct RunOptions {
     search_root: PathBuf,
     symlink_behaviour: SymlinkBehaviour,
     show_all: bool,
+    paranoid: bool,
     verbose: bool,
 }
 
@@ -22,6 +23,10 @@ impl RunOptions {
 
     pub fn show_all(&self) -> bool {
         self.show_all
+    }
+
+    pub fn paranoid(&self) -> bool {
+        self.paranoid
     }
 
     pub fn verbose(&self) -> bool {
@@ -47,6 +52,13 @@ impl RunOptions {
                     .help("Do not ignore directories starting with `.`"),
             )
             .arg(
+                Arg::with_name("paranoid")
+                    .takes_value(false)
+                    .short("p")
+                    .long("paranoid")
+                    .help("Be extra certain that a directory is a git repository."),
+            )
+            .arg(
                 Arg::with_name("verbose")
                     .takes_value(false)
                     .short("v")
@@ -65,6 +77,7 @@ impl RunOptions {
 
         let follow_symlinks = matches.is_present("symlinks");
         let show_all = matches.is_present("all");
+        let paranoid = matches.is_present("paranoid");
         let verbose = matches.is_present("verbose");
 
         let symlink_behaviour = match follow_symlinks {
@@ -78,6 +91,7 @@ impl RunOptions {
                 search_root,
                 symlink_behaviour,
                 show_all,
+                paranoid,
                 verbose,
             }),
         }

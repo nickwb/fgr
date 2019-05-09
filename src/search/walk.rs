@@ -1,8 +1,9 @@
+use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::{DirEntry, ReadDir};
-use std::path::Path;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::vec::Vec;
 
 use crate::search::candidate::SearchCandidate;
@@ -28,10 +29,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                 }
                 SymlinkResolveOutcome::SkipSymlink => {
                     if options.verbose() {
-                        eprintln!(
-                            "Skipping {}, because it is a symlink",
-                            search_path.normal()
-                        );
+                        eprintln!("Skipping {}, because it is a symlink", search_path.normal());
                     }
                     continue;
                 }
@@ -60,14 +58,13 @@ pub fn find_git_repositories(options: &mut RunOptions) {
             }
             Ok(entries) => {
                 let new_depth = search_path.depth() + 1;
-                let mut add_child = |dir: DirEntry| {
+                let mut add_search_candidate = |dir: DirEntry| {
                     to_walk.push(SearchCandidate::from_dir_entry(dir, new_depth));
                 };
 
-                if handle_children(dir, entries, options.show_all(), &mut add_child) {
+                if is_git_repo(&search_path, entries, &mut add_search_candidate, options) {
                     // We got a result, write it to stdout
                     println!("{}", search_path.normal());
-                    
 
                     // Backtrack, we don't need to scan any of the children of this directory
                     while to_walk.len() > start_from {
@@ -79,16 +76,20 @@ pub fn find_git_repositories(options: &mut RunOptions) {
     }
 }
 
-fn handle_children<AddChild: FnMut(DirEntry)>(
-    dir: &Path,
+fn is_git_repo<FnAddCandidate: FnMut(DirEntry)>(
+    search_path: &SearchCandidate,
     entries: ReadDir,
-    show_all: bool,
-    add_child: &mut AddChild,
+    add_search_candidate: &mut FnAddCandidate,
+    options: &RunOptions,
 ) -> bool {
     for entry in entries {
         match entry {
             Err(e) => {
-                eprintln!("Error while walking directory {}. {}", dir.display(), e);
+                eprintln!(
+                    "Error while walking directory {}. {}",
+                    search_path.normal(),
+                    e
+                );
                 return false;
             }
             Ok(entry) => {
@@ -96,15 +97,15 @@ fn handle_children<AddChild: FnMut(DirEntry)>(
 
                 if path.is_dir() {
                     if let Some(name) = path.file_name() {
-                        if is_git_repo(&path, name) {
+                        if is_dot_git_dir(name) && is_git_repo_paranoid(search_path, options) {
                             return true;
                         }
 
-                        if should_skip_directory(&path, name, show_all) {
+                        if should_skip_directory(&path, name, options) {
                             continue;
                         }
 
-                        add_child(entry);
+                        add_search_candidate(entry);
                     }
                 }
             }
@@ -114,12 +115,40 @@ fn handle_children<AddChild: FnMut(DirEntry)>(
     false
 }
 
-fn is_git_repo(_dir: &PathBuf, file_name: &OsStr) -> bool {
+fn is_dot_git_dir(file_name: &OsStr) -> bool {
     file_name == ".git"
 }
 
-fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, show_all: bool) -> bool {
-    !show_all
+fn is_git_repo_paranoid(search_path: &SearchCandidate, options: &RunOptions) -> bool {
+    if !options.paranoid() {
+        return true;
+    }
+
+    if options.verbose() {
+        eprintln!("Paranoid: Checking {}", search_path.normal());
+    }
+
+    // We expect `git rev-parse HEAD` to complete with exit code 0
+    let test = Command::new("git")
+        .current_dir(search_path.to_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .args(&["rev-parse", "HEAD"])
+        .status();
+
+    match test {
+        Ok(status) => status.success(),
+        Err(error) => {
+            eprintln!("Failed to run --paranoid repository check. Is git installed and configured correctly?");
+            eprintln!("{}", error.description());
+            false
+        }
+    }
+}
+
+fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, options: &RunOptions) -> bool {
+    !options.show_all()
         && match file_name.to_str() {
             Some(str) => str.starts_with("."),
             None => true, // If we can't even decode the file name...
