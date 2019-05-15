@@ -1,8 +1,12 @@
+use crate::search::normalize::NormalizedPath;
 use crate::search::symlink::{FollowState, SymlinkBehaviour};
 use clap::{App, Arg};
 use std::env;
 use std::error::Error;
+use std::fmt::Arguments;
+use std::io::Write;
 use std::path::PathBuf;
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 pub struct FgrRun {
     search_root: PathBuf,
@@ -10,6 +14,9 @@ pub struct FgrRun {
     show_all: bool,
     paranoid: bool,
     verbose: bool,
+
+    stdout: StandardStream,
+    stderr: StandardStream,
 }
 
 impl FgrRun {
@@ -31,6 +38,38 @@ impl FgrRun {
 
     pub fn verbose(&self) -> bool {
         self.verbose
+    }
+
+    pub fn output_result(&mut self, path: NormalizedPath) {
+        writeln!(&mut self.stdout, "{}", path).expect("Could not output result.");
+    }
+
+    #[allow(unused_must_use)]
+    pub fn log_info(&mut self, message: Arguments) {
+        if self.verbose {
+            self.stderr
+                .set_color(ColorSpec::new().set_fg(Some(Color::Cyan)));
+            writeln!(&mut self.stderr, "{}", message);
+            self.stderr.reset();
+        }
+    }
+
+    #[allow(unused_must_use)]
+    pub fn log_warning(&mut self, message: Arguments) {
+        if self.verbose {
+            self.stderr
+                .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)));
+            writeln!(&mut self.stderr, "{}", message);
+            self.stderr.reset();
+        }
+    }
+
+    #[allow(unused_must_use)]
+    pub fn log_error(&mut self, message: Arguments) {
+        self.stderr
+            .set_color(ColorSpec::new().set_fg(Some(Color::Red)));
+        writeln!(&mut self.stderr, "{}", message);
+        self.stderr.reset();
     }
 
     pub fn parse_cli() -> Result<FgrRun, String> {
@@ -93,6 +132,8 @@ impl FgrRun {
                 show_all,
                 paranoid,
                 verbose,
+                stdout: StandardStream::stdout(ColorChoice::Auto),
+                stderr: StandardStream::stderr(ColorChoice::Auto),
             }),
         }
     }

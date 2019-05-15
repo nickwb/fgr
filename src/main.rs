@@ -1,4 +1,5 @@
 extern crate clap;
+extern crate termcolor;
 
 mod search;
 use search::cli::FgrRun;

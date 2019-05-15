@@ -19,28 +19,25 @@ pub fn find_git_repositories(run: &mut FgrRun) {
         {
             match search_path.resolve_symlinks(run.symlink_behaviour()) {
                 SymlinkResolveOutcome::AlreadyTraversed => {
-                    if run.verbose() {
-                        eprintln!(
-                            "Skipping: {}, the directory has already been traversed.",
-                            search_path.normal()
-                        );
-                    }
+                    run.log_info(format_args!(
+                        "Skipping: {}, the directory has already been traversed.",
+                        search_path.normal()
+                    ));
                     continue;
                 }
                 SymlinkResolveOutcome::SkipSymlink => {
-                    if run.verbose() {
-                        eprintln!("Skipping {}, because it is a symlink", search_path.normal());
-                    }
+                    run.log_info(format_args!(
+                        "Skipping {}, because it is a symlink",
+                        search_path.normal()
+                    ));
                     continue;
                 }
                 SymlinkResolveOutcome::CanonicalizeFailed(error_message) => {
-                    if run.verbose() {
-                        eprintln!(
-                            "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
-                            search_path.normal(),
-                            error_message
-                        );
-                    }
+                    run.log_warning(format_args!(
+                        "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
+                        search_path.normal(),
+                        error_message
+                    ));
                     continue;
                 }
                 SymlinkResolveOutcome::FollowSymlink => (),
@@ -53,7 +50,11 @@ pub fn find_git_repositories(run: &mut FgrRun) {
 
         match fs::read_dir(dir) {
             Err(e) => {
-                eprintln!("Can't walk directory {}. {}", search_path.normal(), e);
+                run.log_error(format_args!(
+                    "Can't walk directory {}. {}",
+                    search_path.normal(),
+                    e
+                ));
                 continue;
             }
             Ok(entries) => {
@@ -64,7 +65,7 @@ pub fn find_git_repositories(run: &mut FgrRun) {
 
                 if is_git_repo(&search_path, entries, &mut add_search_candidate, run) {
                     // We got a result, write it to stdout
-                    println!("{}", search_path.normal());
+                    run.output_result(search_path.normal());
 
                     // Backtrack, we don't need to scan any of the children of this directory
                     while to_walk.len() > start_from {
@@ -80,16 +81,16 @@ fn is_git_repo<FnAddCandidate: FnMut(DirEntry)>(
     search_path: &SearchCandidate,
     entries: ReadDir,
     add_search_candidate: &mut FnAddCandidate,
-    run: &FgrRun,
+    run: &mut FgrRun,
 ) -> bool {
     for entry in entries {
         match entry {
             Err(e) => {
-                eprintln!(
+                run.log_error(format_args!(
                     "Error while walking directory {}. {}",
                     search_path.normal(),
                     e
-                );
+                ));
                 return false;
             }
             Ok(entry) => {
@@ -119,14 +120,12 @@ fn is_dot_git_dir(file_name: &OsStr) -> bool {
     file_name == ".git"
 }
 
-fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &FgrRun) -> bool {
+fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &mut FgrRun) -> bool {
     if !run.paranoid() {
         return true;
     }
 
-    if run.verbose() {
-        eprintln!("Paranoid: Checking {}", search_path.normal());
-    }
+    run.log_info(format_args!("Paranoid: Checking {}", search_path.normal()));
 
     // We expect `git rev-parse HEAD` to complete with exit code 0
     let test = Command::new("git")
@@ -140,8 +139,8 @@ fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &FgrRun) -> bool {
     match test {
         Ok(status) => status.success(),
         Err(error) => {
-            eprintln!("Failed to run --paranoid repository check. Is git installed and configured correctly?");
-            eprintln!("{}", error.description());
+            run.log_error(format_args!("Failed to run --paranoid repository check. Is git installed and configured correctly?"));
+            run.log_error(format_args!("{}", error.description()));
             false
         }
     }
