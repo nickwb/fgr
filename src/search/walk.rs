@@ -7,19 +7,19 @@ use std::process::{Command, Stdio};
 use std::vec::Vec;
 
 use crate::search::candidate::SearchCandidate;
-use crate::search::cli::RunOptions;
+use crate::search::cli::FgrRun;
 use crate::search::symlink::SymlinkResolveOutcome;
 
-pub fn find_git_repositories(options: &mut RunOptions) {
+pub fn find_git_repositories(run: &mut FgrRun) {
     let mut to_walk = Vec::new();
-    to_walk.push(SearchCandidate::from_path(options.search_root().clone(), 0));
+    to_walk.push(SearchCandidate::from_path(run.search_root().clone(), 0));
 
     while let Some(mut search_path) = to_walk.pop() {
         // Handle symlinks
         {
-            match search_path.resolve_symlinks(options.symlink_behaviour()) {
+            match search_path.resolve_symlinks(run.symlink_behaviour()) {
                 SymlinkResolveOutcome::AlreadyTraversed => {
-                    if options.verbose() {
+                    if run.verbose() {
                         eprintln!(
                             "Skipping: {}, the directory has already been traversed.",
                             search_path.normal()
@@ -28,13 +28,13 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     continue;
                 }
                 SymlinkResolveOutcome::SkipSymlink => {
-                    if options.verbose() {
+                    if run.verbose() {
                         eprintln!("Skipping {}, because it is a symlink", search_path.normal());
                     }
                     continue;
                 }
                 SymlinkResolveOutcome::CanonicalizeFailed(error_message) => {
-                    if options.verbose() {
+                    if run.verbose() {
                         eprintln!(
                             "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
                             search_path.normal(),
@@ -62,7 +62,7 @@ pub fn find_git_repositories(options: &mut RunOptions) {
                     to_walk.push(SearchCandidate::from_dir_entry(dir, new_depth));
                 };
 
-                if is_git_repo(&search_path, entries, &mut add_search_candidate, options) {
+                if is_git_repo(&search_path, entries, &mut add_search_candidate, run) {
                     // We got a result, write it to stdout
                     println!("{}", search_path.normal());
 
@@ -80,7 +80,7 @@ fn is_git_repo<FnAddCandidate: FnMut(DirEntry)>(
     search_path: &SearchCandidate,
     entries: ReadDir,
     add_search_candidate: &mut FnAddCandidate,
-    options: &RunOptions,
+    run: &FgrRun,
 ) -> bool {
     for entry in entries {
         match entry {
@@ -97,11 +97,11 @@ fn is_git_repo<FnAddCandidate: FnMut(DirEntry)>(
 
                 if path.is_dir() {
                     if let Some(name) = path.file_name() {
-                        if is_dot_git_dir(name) && is_git_repo_paranoid(search_path, options) {
+                        if is_dot_git_dir(name) && is_git_repo_paranoid(search_path, run) {
                             return true;
                         }
 
-                        if should_skip_directory(&path, name, options) {
+                        if should_skip_directory(&path, name, run) {
                             continue;
                         }
 
@@ -119,12 +119,12 @@ fn is_dot_git_dir(file_name: &OsStr) -> bool {
     file_name == ".git"
 }
 
-fn is_git_repo_paranoid(search_path: &SearchCandidate, options: &RunOptions) -> bool {
-    if !options.paranoid() {
+fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &FgrRun) -> bool {
+    if !run.paranoid() {
         return true;
     }
 
-    if options.verbose() {
+    if run.verbose() {
         eprintln!("Paranoid: Checking {}", search_path.normal());
     }
 
@@ -147,8 +147,8 @@ fn is_git_repo_paranoid(search_path: &SearchCandidate, options: &RunOptions) -> 
     }
 }
 
-fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, options: &RunOptions) -> bool {
-    !options.show_all()
+fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, run: &FgrRun) -> bool {
+    !run.show_all()
         && match file_name.to_str() {
             Some(str) => str.starts_with("."),
             None => true, // If we can't even decode the file name...

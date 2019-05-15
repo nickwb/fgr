@@ -4,7 +4,7 @@ use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 
-pub struct RunOptions {
+pub struct FgrRun {
     search_root: PathBuf,
     symlink_behaviour: SymlinkBehaviour,
     show_all: bool,
@@ -12,7 +12,7 @@ pub struct RunOptions {
     verbose: bool,
 }
 
-impl RunOptions {
+impl FgrRun {
     pub fn search_root(&self) -> &PathBuf {
         &self.search_root
     }
@@ -33,7 +33,7 @@ impl RunOptions {
         self.verbose
     }
 
-    pub fn parse_cli() -> Result<RunOptions, String> {
+    pub fn parse_cli() -> Result<FgrRun, String> {
         let app = App::new("fgr")
             .version("0.1")
             .author("Nick Young")
@@ -87,7 +87,7 @@ impl RunOptions {
 
         match get_search_root(matches.value_of("search-root")) {
             Err(error) => Err(error),
-            Ok(search_root) => Ok(RunOptions {
+            Ok(search_root) => Ok(FgrRun {
                 search_root,
                 symlink_behaviour,
                 show_all,
