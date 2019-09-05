@@ -1,3 +1,0 @@
-# TODO
-
-- Max search depth
