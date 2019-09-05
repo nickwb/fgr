@@ -46,7 +46,7 @@ impl FgrRun {
 
     #[allow(unused_must_use)]
     pub fn log_info(&mut self, message: Arguments) {
-        if self.verbose {
+        if self.verbose() {
             self.stderr
                 .set_color(ColorSpec::new().set_fg(Some(Color::Cyan)));
             writeln!(&mut self.stderr, "{}", message);
@@ -56,7 +56,7 @@ impl FgrRun {
 
     #[allow(unused_must_use)]
     pub fn log_warning(&mut self, message: Arguments) {
-        if self.verbose {
+        if self.verbose() {
             self.stderr
                 .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)));
             writeln!(&mut self.stderr, "{}", message);
