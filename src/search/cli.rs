@@ -1,31 +1,25 @@
-use crate::search::normalize::NormalizedPath;
-use crate::search::symlink::{FollowState, SymlinkBehaviour};
 use clap::{App, Arg};
-use std::env;
-use std::error::Error;
-use std::fmt::Arguments;
 use std::io::Write;
-use std::path::PathBuf;
+use std::{env, fmt::Arguments};
+use std::{io, path::PathBuf};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-pub struct FgrRun {
+pub struct InvokeOptions {
     search_root: PathBuf,
-    symlink_behaviour: SymlinkBehaviour,
+    follow_symlinks: bool,
     show_all: bool,
     paranoid: bool,
     verbose: bool,
-
-    stdout: StandardStream,
-    stderr: StandardStream,
+    max_depth: usize,
 }
 
-impl FgrRun {
+impl InvokeOptions {
     pub fn search_root(&self) -> &PathBuf {
         &self.search_root
     }
 
-    pub fn symlink_behaviour(&mut self) -> &mut SymlinkBehaviour {
-        &mut self.symlink_behaviour
+    pub fn follow_symlinks(&self) -> bool {
+        self.follow_symlinks
     }
 
     pub fn show_all(&self) -> bool {
@@ -40,39 +34,11 @@ impl FgrRun {
         self.verbose
     }
 
-    pub fn output_result(&mut self, path: NormalizedPath) {
-        writeln!(&mut self.stdout, "{}", path).expect("Could not output result.");
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
     }
 
-    #[allow(unused_must_use)]
-    pub fn log_info(&mut self, message: Arguments) {
-        if self.verbose() {
-            self.stderr
-                .set_color(ColorSpec::new().set_fg(Some(Color::Cyan)));
-            writeln!(&mut self.stderr, "{}", message);
-            self.stderr.reset();
-        }
-    }
-
-    #[allow(unused_must_use)]
-    pub fn log_warning(&mut self, message: Arguments) {
-        if self.verbose() {
-            self.stderr
-                .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)));
-            writeln!(&mut self.stderr, "{}", message);
-            self.stderr.reset();
-        }
-    }
-
-    #[allow(unused_must_use)]
-    pub fn log_error(&mut self, message: Arguments) {
-        self.stderr
-            .set_color(ColorSpec::new().set_fg(Some(Color::Red)));
-        writeln!(&mut self.stderr, "{}", message);
-        self.stderr.reset();
-    }
-
-    pub fn parse_cli() -> Result<FgrRun, String> {
+    pub fn parse_cli() -> Result<InvokeOptions, String> {
         let app = App::new("fgr")
             .version("0.1")
             .author("Nick Young")
@@ -110,6 +76,21 @@ impl FgrRun {
                     .long("follow-symlinks")
                     .takes_value(false)
                     .help("Follow symlinks rather than ignoring them"),
+            )
+            .arg(
+                Arg::with_name("max-depth")
+                    .short("d")
+                    .long("max-depth")
+                    .takes_value(true)
+                    .default_value("10")
+                    .conflicts_with("any-depth")
+                    .help("Sets the maximum depth when recursively scanning subdirectories"),
+            )
+            .arg(
+                Arg::with_name("any-depth")
+                    .long("any-depth")
+                    .conflicts_with("max-depth")
+                    .help("Drops the default max-depth limit, allowing unlimited depth"),
             );
 
         let matches = app.get_matches();
@@ -119,21 +100,24 @@ impl FgrRun {
         let paranoid = matches.is_present("paranoid");
         let verbose = matches.is_present("verbose");
 
-        let symlink_behaviour = match follow_symlinks {
-            false => SymlinkBehaviour::Skip,
-            true => SymlinkBehaviour::Follow(FollowState::new()),
+        let max_depth = if matches.is_present("any-depth") {
+            usize::MAX
+        } else {
+            matches
+                .value_of("max-depth")
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(10)
         };
 
         match get_search_root(matches.value_of("search-root")) {
             Err(error) => Err(error),
-            Ok(search_root) => Ok(FgrRun {
+            Ok(search_root) => Ok(InvokeOptions {
                 search_root,
-                symlink_behaviour,
+                follow_symlinks,
                 show_all,
                 paranoid,
                 verbose,
-                stdout: StandardStream::stdout(ColorChoice::Auto),
-                stderr: StandardStream::stderr(ColorChoice::Auto),
+                max_depth,
             }),
         }
     }
@@ -143,10 +127,7 @@ fn get_search_root(cfg: Option<&str>) -> Result<PathBuf, String> {
     match cfg {
         None => match env::current_dir() {
             Ok(path) => Ok(path),
-            Err(error) => Err(format!(
-                "Could not get current directory => {}",
-                error.description()
-            )),
+            Err(error) => Err(format!("Could not get current directory => {}", error)),
         },
         Some(path_str) => match PathBuf::from(path_str).canonicalize() {
             Ok(path) => {
@@ -158,9 +139,50 @@ fn get_search_root(cfg: Option<&str>) -> Result<PathBuf, String> {
             }
             Err(error) => Err(format!(
                 "Directory `{}` is invalid or does not exist => {}",
-                path_str,
-                error.description()
+                path_str, error
             )),
         },
+    }
+}
+
+pub struct MessageOutput {
+    is_verbose: bool,
+    stderr: StandardStream,
+}
+
+impl MessageOutput {
+    pub fn new(opts: &InvokeOptions) -> Self {
+        Self {
+            is_verbose: opts.verbose(),
+            stderr: StandardStream::stderr(ColorChoice::Auto),
+        }
+    }
+
+    pub fn log_info(&mut self, message: Arguments) -> io::Result<()> {
+        if self.is_verbose {
+            self.stderr
+                .set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
+            writeln!(&mut self.stderr, "{}", message)?;
+            self.stderr.reset()?;
+        }
+        Ok(())
+    }
+
+    pub fn log_warning(&mut self, message: Arguments) -> io::Result<()> {
+        if self.is_verbose {
+            self.stderr
+                .set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))?;
+            writeln!(&mut self.stderr, "{}", message)?;
+            self.stderr.reset()?;
+        }
+        Ok(())
+    }
+
+    pub fn log_error(&mut self, message: Arguments) -> io::Result<()> {
+        self.stderr
+            .set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
+        writeln!(&mut self.stderr, "{}", message)?;
+        self.stderr.reset()?;
+        Ok(())
     }
 }

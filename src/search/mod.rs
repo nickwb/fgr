@@ -1,5 +1,3 @@
-pub mod candidate;
 pub mod cli;
-pub mod symlink;
 pub mod walk;
-pub mod normalize;
+pub mod workpath;

@@ -1,135 +1,107 @@
-use std::error::Error;
-use std::ffi::OsStr;
-use std::fs;
-use std::fs::{DirEntry, ReadDir};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::vec::Vec;
+use super::{cli::InvokeOptions, cli::MessageOutput, workpath::WorkPath};
+use std::{
+    io,
+    iter::Iterator,
+    process::{Command, Stdio},
+};
+use walkdir::WalkDir;
 
-use crate::search::candidate::SearchCandidate;
-use crate::search::cli::FgrRun;
-use crate::search::symlink::SymlinkResolveOutcome;
+pub fn find_git_repositories(opts: &InvokeOptions) -> io::Result<()> {
+    let mut output = MessageOutput::new(opts);
+    let output = &mut output;
 
-pub fn find_git_repositories(run: &mut FgrRun) {
-    let mut to_walk = Vec::new();
-    to_walk.push(SearchCandidate::from_path(run.search_root().clone(), 0));
+    let walk = WalkDir::new(opts.search_root())
+        .follow_links(opts.follow_symlinks())
+        .min_depth(0)
+        .max_depth(opts.max_depth());
 
-    while let Some(mut search_path) = to_walk.pop() {
-        // Handle symlinks
-        {
-            match search_path.resolve_symlinks(run.symlink_behaviour()) {
-                SymlinkResolveOutcome::AlreadyTraversed => {
-                    run.log_info(format_args!(
-                        "Skipping: {}, the directory has already been traversed.",
-                        search_path.normal()
-                    ));
-                    continue;
-                }
-                SymlinkResolveOutcome::SkipSymlink => {
-                    run.log_info(format_args!(
-                        "Skipping {}, because it is a symlink",
-                        search_path.normal()
-                    ));
-                    continue;
-                }
-                SymlinkResolveOutcome::CanonicalizeFailed(error_message) => {
-                    run.log_warning(format_args!(
-                        "Tried to follow symlink: {}, but there was an error resolving the link target => {}.",
-                        search_path.normal(),
-                        error_message
-                    ));
-                    continue;
-                }
-                SymlinkResolveOutcome::FollowSymlink => (),
-                SymlinkResolveOutcome::NotSymlink => (),
+    let maybe_error = walk
+        .into_iter()
+        .filter_entry(|e| {
+            let is_dir = e.file_type().is_dir();
+            let mut path = WorkPath::new(e.path());
+            if is_dir && is_git_repo(&mut path, opts, output).unwrap_or(false) {
+                path.resolve_canonical(output);
+                println!("{}", path);
+                false
+            } else if is_dir && should_skip_directory(&path, opts) {
+                path.resolve_canonical(output);
+                output
+                    .log_info(format_args!("Skipping directory: {}", path))
+                    .unwrap_or_default();
+                false
+            } else {
+                true
             }
-        }
+        })
+        // Stop on the first error, or process the whole tree
+        .filter(|x| x.is_err())
+        .next();
 
-        let dir = search_path.to_path();
-        let start_from = to_walk.len();
-
-        match fs::read_dir(dir) {
-            Err(e) => {
-                run.log_error(format_args!(
-                    "Can't walk directory {}. {}",
-                    search_path.normal(),
-                    e
-                ));
-                continue;
-            }
-            Ok(entries) => {
-                let new_depth = search_path.depth() + 1;
-                let mut add_search_candidate = |dir: DirEntry| {
-                    to_walk.push(SearchCandidate::from_dir_entry(dir, new_depth));
-                };
-
-                if is_git_repo(&search_path, entries, &mut add_search_candidate, run) {
-                    // We got a result, write it to stdout
-                    run.output_result(search_path.normal());
-
-                    // Backtrack, we don't need to scan any of the children of this directory
-                    while to_walk.len() > start_from {
-                        to_walk.pop();
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn is_git_repo<FnAddCandidate: FnMut(DirEntry)>(
-    search_path: &SearchCandidate,
-    entries: ReadDir,
-    add_search_candidate: &mut FnAddCandidate,
-    run: &mut FgrRun,
-) -> bool {
-    for entry in entries {
-        match entry {
-            Err(e) => {
-                run.log_error(format_args!(
-                    "Error while walking directory {}. {}",
-                    search_path.normal(),
-                    e
-                ));
-                return false;
-            }
-            Ok(entry) => {
-                let path = entry.path();
-
-                if path.is_dir() {
-                    if let Some(name) = path.file_name() {
-                        if is_dot_git_dir(name) && is_git_repo_paranoid(search_path, run) {
-                            return true;
-                        }
-
-                        if should_skip_directory(&path, name, run) {
-                            continue;
-                        }
-
-                        add_search_candidate(entry);
-                    }
-                }
-            }
-        }
+    if let Some(Err(error)) = maybe_error {
+        output
+            .log_error(format_args!(
+                "An error occurred while scanning for git repositories"
+            ))
+            .unwrap_or_default();
+        output
+            .log_error(format_args!("{}", error))
+            .unwrap_or_default();
     }
 
-    false
+    Ok(())
 }
 
-fn is_dot_git_dir(file_name: &OsStr) -> bool {
-    file_name == ".git"
+fn should_skip_directory(path: &WorkPath, opts: &InvokeOptions) -> bool {
+    !opts.show_all()
+        && path
+            .file_name()
+            .to_str()
+            .map(|s| s.starts_with("."))
+            .unwrap_or(true) // If we can't decode the name, we should probably skip it
 }
 
-fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &mut FgrRun) -> bool {
-    if !run.paranoid() {
-        return true;
-    }
+fn is_git_repo(
+    path: &mut WorkPath,
+    opts: &InvokeOptions,
+    output: &mut MessageOutput,
+) -> io::Result<bool> {
+    // See if we have a .git directory
+    let dot_git_path = path.as_maybe_unresolved_path().join(".git");
+    let has_dot_git = dot_git_path.metadata().map(|m| m.is_dir());
 
-    run.log_info(format_args!("Paranoid: Checking {}", search_path.normal()));
+    let has_dot_git = match has_dot_git {
+        Ok(x) => x,
+        Err(err) => match err.kind() {
+            io::ErrorKind::NotFound => false,
+            io::ErrorKind::PermissionDenied => {
+                let mut workpath = WorkPath::new(dot_git_path.as_path());
+                workpath.resolve_canonical(output);
+
+                output
+                    .log_error(format_args!(
+                        "Insufficient permissions to traverse: {}",
+                        workpath
+                    ))
+                    .unwrap_or_default();
+                false
+            }
+            _ => return Err(err),
+        },
+    };
+
+    Ok(has_dot_git && (!opts.paranoid() || is_git_repo_paranoid(path, output)?))
+}
+
+fn is_git_repo_paranoid(path: &mut WorkPath, output: &mut MessageOutput) -> io::Result<bool> {
+    path.resolve_canonical(output);
+    output
+        .log_info(format_args!("Paranoid: Checking {}", path))
+        .unwrap_or_default();
 
     // We expect `git rev-parse HEAD` to complete with exit code 0
     let test = Command::new("git")
-        .current_dir(search_path.to_path())
+        .current_dir(path.as_maybe_unresolved_path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -137,19 +109,24 @@ fn is_git_repo_paranoid(search_path: &SearchCandidate, run: &mut FgrRun) -> bool
         .status();
 
     match test {
-        Ok(status) => status.success(),
+        Ok(status) => {
+            if !status.success() {
+                output
+                    .log_warning(format_args!("Paranoid check failed for: {}", path))
+                    .unwrap_or_default();
+                Ok(false)
+            } else {
+                Ok(true)
+            }
+        }
         Err(error) => {
-            run.log_error(format_args!("Failed to run --paranoid repository check. Is git installed and configured correctly?"));
-            run.log_error(format_args!("{}", error.description()));
-            false
+            output
+                .log_error(format_args!("Failed to run --paranoid repository check. Is git installed and configured correctly?"))
+                .unwrap_or_default();
+            output
+                .log_error(format_args!("{}", error))
+                .unwrap_or_default();
+            Err(error)
         }
     }
-}
-
-fn should_skip_directory(_dir: &PathBuf, file_name: &OsStr, run: &FgrRun) -> bool {
-    !run.show_all()
-        && match file_name.to_str() {
-            Some(str) => str.starts_with("."),
-            None => true, // If we can't even decode the file name...
-        }
 }
