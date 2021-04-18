@@ -1,5 +1,6 @@
 use super::cli::MessageOutput;
 use std::{
+    cell::RefCell,
     ffi::OsStr,
     fmt::{self, Display},
     path::PathBuf,
@@ -35,11 +36,12 @@ impl WorkPath<'_> {
         }
     }
 
-    pub fn resolve_canonical(&mut self, output: &mut MessageOutput) -> &Self {
+    pub fn resolve_canonical(&mut self, output: &RefCell<MessageOutput>) -> &Self {
         if let WorkPath::Unresolved(path) = self {
             let canonical = path.canonicalize();
 
             if let Err(e) = &canonical {
+                let output = &mut output.borrow_mut();
                 output
                     .log_warning(format_args!(
                         "Could not determine the canonical path for: {}",

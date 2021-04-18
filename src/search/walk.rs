@@ -1,5 +1,6 @@
 use super::{cli::InvokeOptions, cli::MessageOutput, workpath::WorkPath};
 use std::{
+    cell::RefCell,
     io,
     iter::Iterator,
     process::{Command, Stdio},
@@ -7,8 +8,7 @@ use std::{
 use walkdir::WalkDir;
 
 pub fn find_git_repositories(opts: &InvokeOptions) -> io::Result<()> {
-    let mut output = MessageOutput::new(opts);
-    let output = &mut output;
+    let output = &RefCell::new(MessageOutput::new(opts));
 
     let walk = WalkDir::new(opts.search_root())
         .follow_links(opts.follow_symlinks())
@@ -20,13 +20,15 @@ pub fn find_git_repositories(opts: &InvokeOptions) -> io::Result<()> {
         .filter_entry(|e| {
             let is_dir = e.file_type().is_dir();
             let mut path = WorkPath::new(e.path());
-            if is_dir && is_git_repo(&mut path, opts, output).unwrap_or(false) {
-                path.resolve_canonical(output);
+
+            if is_dir && is_git_repo(&mut path, opts, &output).unwrap_or(false) {
+                path.resolve_canonical(&output);
                 println!("{}", path);
                 false
             } else if is_dir && should_skip_directory(&path, opts) {
-                path.resolve_canonical(output);
+                path.resolve_canonical(&output);
                 output
+                    .borrow_mut()
                     .log_info(format_args!("Skipping directory: {}", path))
                     .unwrap_or_default();
                 false
@@ -35,10 +37,56 @@ pub fn find_git_repositories(opts: &InvokeOptions) -> io::Result<()> {
             }
         })
         // Stop on the first error, or process the whole tree
-        .filter(|x| x.is_err())
+        .filter(|x| match x {
+            Ok(_) => false, // Normal directory entries which are not git repositories
+            Err(e) => match (e.loop_ancestor(), e.io_error()) {
+                // Loop detected, keep scanning
+                (Some(cycle), _) => {
+                    let mut workpath = WorkPath::new(cycle);
+                    workpath.resolve_canonical(&output);
+
+                    let output = &mut output.borrow_mut();
+                    output
+                        .log_warning(format_args!(
+                            "A symlink cycle was detected at: {}",
+                            workpath
+                        ))
+                        .unwrap_or_default();
+                    false
+                }
+                (_, Some(io)) => match io.kind() {
+                    io::ErrorKind::PermissionDenied => {
+                        if let Some(path) = e.path() {
+                            let mut workpath = WorkPath::new(path);
+                            workpath.resolve_canonical(&output);
+
+                            let output = &mut output.borrow_mut();
+                            output
+                                .log_warning(format_args!(
+                                    "Insufficient permissions to traverse: {}",
+                                    workpath
+                                ))
+                                .unwrap_or_default();
+                        } else {
+                            output
+                                .borrow_mut()
+                                .log_warning(format_args!(
+                                    "Permission denied while scanning for repositories"
+                                ))
+                                .unwrap_or_default();
+                        }
+                        false
+                    }
+                    _ => true,
+                },
+                // Probably impossible, but some other combination of error
+                _ => true,
+            },
+        })
         .next();
 
     if let Some(Err(error)) = maybe_error {
+        let output = &mut output.borrow_mut();
         output
             .log_error(format_args!(
                 "An error occurred while scanning for git repositories"
@@ -64,7 +112,7 @@ fn should_skip_directory(path: &WorkPath, opts: &InvokeOptions) -> bool {
 fn is_git_repo(
     path: &mut WorkPath,
     opts: &InvokeOptions,
-    output: &mut MessageOutput,
+    output: &RefCell<MessageOutput>,
 ) -> io::Result<bool> {
     // See if we have a .git directory
     let dot_git_path = path.as_maybe_unresolved_path().join(".git");
@@ -79,6 +127,7 @@ fn is_git_repo(
                 workpath.resolve_canonical(output);
 
                 output
+                    .borrow_mut()
                     .log_error(format_args!(
                         "Insufficient permissions to traverse: {}",
                         workpath
@@ -93,8 +142,10 @@ fn is_git_repo(
     Ok(has_dot_git && (!opts.paranoid() || is_git_repo_paranoid(path, output)?))
 }
 
-fn is_git_repo_paranoid(path: &mut WorkPath, output: &mut MessageOutput) -> io::Result<bool> {
+fn is_git_repo_paranoid(path: &mut WorkPath, output: &RefCell<MessageOutput>) -> io::Result<bool> {
     path.resolve_canonical(output);
+
+    let output = &mut output.borrow_mut();
     output
         .log_info(format_args!("Paranoid: Checking {}", path))
         .unwrap_or_default();

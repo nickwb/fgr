@@ -40,7 +40,7 @@ impl InvokeOptions {
 
     pub fn parse_cli() -> Result<InvokeOptions, String> {
         let app = App::new("fgr")
-            .version("0.1")
+            .version("0.2")
             .author("Nick Young")
             .about("A simple utility for finding git repositories.")
             .arg(
@@ -61,7 +61,7 @@ impl InvokeOptions {
                     .takes_value(false)
                     .short("p")
                     .long("paranoid")
-                    .help("Be extra certain that a directory is a git repository."),
+                    .help("Be extra certain that a directory is a git repository"),
             )
             .arg(
                 Arg::with_name("verbose")
@@ -83,13 +83,11 @@ impl InvokeOptions {
                     .long("max-depth")
                     .takes_value(true)
                     .default_value("10")
-                    .conflicts_with("any-depth")
                     .help("Sets the maximum depth when recursively scanning subdirectories"),
             )
             .arg(
                 Arg::with_name("any-depth")
                     .long("any-depth")
-                    .conflicts_with("max-depth")
                     .help("Drops the default max-depth limit, allowing unlimited depth"),
             );
 

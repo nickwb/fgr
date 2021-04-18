@@ -1,6 +1,6 @@
 [package]
 name = "fgr"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Nick Young <nick@nickwb.net>"]
 edition = "2018"
 
